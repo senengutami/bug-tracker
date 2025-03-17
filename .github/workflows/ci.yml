@@ -1,9 +1,9 @@
 name: CI
 
 on:
-  # push:
-  #   branches:
-  #     - main
+  push:
+    branches:
+      - main
   pull_request:
     branches:
       - main
@@ -219,5 +219,65 @@ jobs:
         if: always()
         with:
           name: E2E Tests Report
+          path: ./tests-e2e/test-results/results.xml
+          reporter: jest-junit
+
+  deploy-staging:
+    needs: [api-e2e-perf-tests]
+    if: github.ref == 'refs/head/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy Backend
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        working-directory: ./bugtracker-backend
+        run: flyctl deploy -c fly.staging.toml --remote-only
+
+      - name: Deploy Frontend
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        working-directory: ./bugtracker-frontend
+        run: flyctl deploy -c fly.staging.toml --remote-only
+
+  post-deployment-tests:
+    needs: deploy-staging
+    if: github.ref == 'refs/head/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Playwright
+        working-directory: ./tests-e2e
+        run: |
+          npm ci
+          npx playwright install
+
+      - name: Run Post Deployment Tests
+        working-directory: ./tests-e2e
+        env:
+          PLAYWRIGHT_TEST_BASE_URL: "https://bugtracker-staging-jamiewillett.fly.dev"
+        run: |
+          npx playwright test
+
+      - name: Upload Post Deployment Test Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: post-deployment-test-playwright-report
+          path: ./tests-e2e/playwright-report
+          retention-days: 30
+
+      - name: Publish Post Deployment Test Results
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: Post Deployment Tests Report
           path: ./tests-e2e/test-results/results.xml
           reporter: jest-junit
