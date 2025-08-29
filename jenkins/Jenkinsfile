@@ -9,14 +9,31 @@ pipeline {
             dir('bugtracker-backend') {
               sh '''
                 set -e
+                set -o pipefail
+
+                # Use writable caches to avoid permission issues
                 export GOCACHE=/tmp/go-build
                 export GOMODCACHE=/tmp/go-mod
                 mkdir -p "$GOCACHE" "$GOMODCACHE"
+
                 go mod download
-                go test -v ./...
+
+                # Install go-junit-report in the container and add to PATH
+                go install github.com/jstemmer/go-junit-report/v2@latest
+                export PATH="$(go env GOPATH)/bin:$PATH"
+
+                # Run tests and convert to JUnit XML
+                go test -v ./... 2>&1 | go-junit-report > test-results.xml
               '''
             }
           }
+        }
+      }
+      post {
+        always {
+          junit 'bugtracker-backend/test-results.xml'
+          // optional: archive raw xml too
+          archiveArtifacts artifacts: 'bugtracker-backend/test-results.xml', allowEmptyArchive: true
         }
       }
     }
@@ -24,7 +41,7 @@ pipeline {
     stage('Unit Tests - Frontend') {
       agent {
         docker {
-          image 'node:20-alpine'   // use 'node:20' if native deps complain
+          image 'node:20-alpine'   // switch to 'node:20' if native deps cause trouble
           reuseNode true
         }
       }
@@ -34,8 +51,7 @@ pipeline {
             set -e
             npm ci
             CI=true npm test -- --watch=false
-            # debug: show that jest-junit wrote the file
-            ls -la .
+            ls -la .  # debug: confirm test-results.xml exists
           '''
         }
       }
