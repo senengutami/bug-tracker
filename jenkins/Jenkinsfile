@@ -1,33 +1,53 @@
 pipeline {
   agent any
 
-  stages {
-    stage('Unit Tests - Backend') {
-      steps {
-        script {
-          docker.image('golang:1.21').inside('') {
-            dir('bugtracker-backend') {
-              sh '''
-                set -e
-                set -o pipefail
+  stage('Unit Tests - Backend') {
+  steps {
+    script {
+      docker.image('golang:1.21').inside('') {
+        dir('bugtracker-backend') {
+          sh '''
+            bash -lc '
+              set -euo pipefail
 
-                # Use writable caches to avoid permission issues
-                export GOCACHE=/tmp/go-build
-                export GOMODCACHE=/tmp/go-mod
-                mkdir -p "$GOCACHE" "$GOMODCACHE"
+              # writable caches
+              export GOCACHE=/tmp/go-build
+              export GOMODCACHE=/tmp/go-mod
+              mkdir -p "$GOCACHE" "$GOMODCACHE"
 
-                go mod download
+              echo "== go env =="; go version; go env GOPATH GOMOD GOCACHE GOMODCACHE
+              echo "== go mod download =="; go mod download
 
-                # Install go-junit-report in the container and add to PATH
-                go install github.com/jstemmer/go-junit-report/v2@latest
-                export PATH="$(go env GOPATH)/bin:$PATH"
+              echo "== install go-junit-report =="
+              go install github.com/jstemmer/go-junit-report/v2@latest
+              export PATH="$(go env GOPATH)/bin:$PATH"
+              which go-junit-report || { echo "go-junit-report not found"; exit 2; }
 
-                # Run tests and convert to JUnit XML
-                go test -v ./... 2>&1 | go-junit-report > test-results.xml
-              '''
-            }
-          }
+              echo "== run tests =="
+              # keep full output and capture exit code of go test
+              go test -v ./... 2>&1 | tee test.out
+              status=${PIPESTATUS[0]}
+
+              echo "== convert to JUnit XML =="
+              go-junit-report < test.out > test-results.xml || echo "conversion failed"
+
+              ls -lah test.out test-results.xml || true
+              exit $status
+            '
+          '''
         }
+      }
+    }
+  }
+  post {
+    always {
+      // allowEmptyResults avoids a hard fail if XML was not produced
+      junit testResults: 'bugtracker-backend/test-results.xml', allowEmptyResults: true
+      archiveArtifacts artifacts: 'bugtracker-backend/test.out, bugtracker-backend/test-results.xml', allowEmptyArchive: true
+    }
+  }
+}
+
       }
       post {
         always {
