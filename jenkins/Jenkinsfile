@@ -1,59 +1,27 @@
 pipeline {
   agent any
 
-  stage('Unit Tests - Backend') {
-  steps {
-    script {
-      docker.image('golang:1.21').inside('') {
-        dir('bugtracker-backend') {
-          sh '''
-            bash -lc '
-              set -euo pipefail
-
-              # writable caches
-              export GOCACHE=/tmp/go-build
-              export GOMODCACHE=/tmp/go-mod
-              mkdir -p "$GOCACHE" "$GOMODCACHE"
-
-              echo "== go env =="; go version; go env GOPATH GOMOD GOCACHE GOMODCACHE
-              echo "== go mod download =="; go mod download
-
-              echo "== install go-junit-report =="
-              go install github.com/jstemmer/go-junit-report/v2@latest
-              export PATH="$(go env GOPATH)/bin:$PATH"
-              which go-junit-report || { echo "go-junit-report not found"; exit 2; }
-
-              echo "== run tests =="
-              # keep full output and capture exit code of go test
-              go test -v ./... 2>&1 | tee test.out
-              status=${PIPESTATUS[0]}
-
-              echo "== convert to JUnit XML =="
-              go-junit-report < test.out > test-results.xml || echo "conversion failed"
-
-              ls -lah test.out test-results.xml || true
-              exit $status
-            '
-          '''
-        }
-      }
-    }
-  }
-  post {
-    always {
-      // allowEmptyResults avoids a hard fail if XML was not produced
-      junit testResults: 'bugtracker-backend/test-results.xml', allowEmptyResults: true
-      archiveArtifacts artifacts: 'bugtracker-backend/test.out, bugtracker-backend/test-results.xml', allowEmptyArchive: true
-    }
+  stages {
+    stage('Unit Tests - Backend') {
+      steps {
+        script {
+          docker.image('golang:1.21').inside('') {
+            dir('bugtracker-backend') {
+              sh '''
+                set -e
+                export GOCACHE=/tmp/go-build
+                export GOMODCACHE=/tmp/go-mod
+                mkdir -p "$GOCACHE" "$GOMODCACHE"
+                go mod download
+                go test -v ./... 2>&1 | go-junit_report > test-results.xml
+              '''
+            }
+          }
+          post {
+  always {
+    junit 'bugtracker-backend/test-results.xml'
   }
 }
-
-      }
-      post {
-        always {
-          junit 'bugtracker-backend/test-results.xml'
-          // optional: archive raw xml too
-          archiveArtifacts artifacts: 'bugtracker-backend/test-results.xml', allowEmptyArchive: true
         }
       }
     }
@@ -61,7 +29,7 @@ pipeline {
     stage('Unit Tests - Frontend') {
       agent {
         docker {
-          image 'node:20-alpine'   // switch to 'node:20' if native deps cause trouble
+          image 'node:20-alpine'   // use 'node:20' if native deps complain
           reuseNode true
         }
       }
@@ -71,7 +39,8 @@ pipeline {
             set -e
             npm ci
             CI=true npm test -- --watch=false
-            ls -la .  # debug: confirm test-results.xml exists
+            # debug: show that jest-junit wrote the file
+            ls -la .
           '''
         }
       }
