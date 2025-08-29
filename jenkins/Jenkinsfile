@@ -24,7 +24,7 @@ pipeline {
     stage('Unit Tests - Frontend') {
       agent {
         docker {
-          image 'node:20-alpine'   // or 'node:20' if you need build tools
+          image 'node:20-alpine'   // use 'node:20' if native deps complain
           reuseNode true
         }
       }
@@ -34,7 +34,15 @@ pipeline {
             set -e
             npm ci
             CI=true npm test -- --watch=false
+            # debug: show that jest-junit wrote the file
+            ls -la .
           '''
+        }
+      }
+      post {
+        always {
+          junit 'bugtracker-frontend/test-results.xml'
+          archiveArtifacts artifacts: 'bugtracker-frontend/coverage/**', allowEmptyArchive: true
         }
       }
     }
