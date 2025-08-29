@@ -1,5 +1,6 @@
 pipeline {
   agent any
+
   stages {
     stage('Unit Tests - Backend') {
       steps {
@@ -21,20 +22,21 @@ pipeline {
     }
 
     stage('Unit Tests - Frontend') {
-        agent {
-            docker {
-                image 'node:20-alpine'
-                reuseNote true
-            }
+      agent {
+        docker {
+          image 'node:20-alpine'   // or 'node:20' if you need build tools
+          reuseNode true
         }
-        steps {
-            dir('bugtracker-frontend') {
-                sh '''
-                   npm ci
-                   npm test
-                '''
-            }
+      }
+      steps {
+        dir('bugtracker-frontend') {
+          sh '''
+            set -e
+            npm ci
+            CI=true npm test -- --watch=false
+          '''
         }
+      }
     }
   }
 }
