@@ -1,19 +1,128 @@
 pipeline {
-    agent any
+  agent any
 
-    stages {
+  stages {
+    stage('Execute Unit Tests') {
+      parallel {
+
         stage('Unit Tests - Backend') {
-              agent {
-                docker {
-                    image 'snakee/golang-junit:1.21'
-                    reuseNode true
-                }
-              }
-            steps {
-                dir('bugtracker-backend'){
-                    sh 'go test -v ./...'
-                }
+          agent {
+            docker {
+              image 'golang:1.21'     // you can switch back to snakee/golang-junit:1.21 if you prefer
+              reuseNode true
             }
+          }
+          steps {
+            dir('bugtracker-backend') {
+              sh '''
+                bash -lc '
+                  set -euo pipefail
+
+                  # Writable caches (avoid permission issues)
+                  export GOCACHE=/tmp/go-build
+                  export GOMODCACHE=/tmp/go-mod
+                  mkdir -p "$GOCACHE" "$GOMODCACHE"
+
+                  # Ensure deps
+                  go mod download
+
+                  # Install converter and expose on PATH
+                  go install github.com/jstemmer/go-junit-report/v2@latest
+                  export PATH="$(go env GOPATH)/bin:$PATH"
+
+                  # --- Tests → JUnit XML (robust JSON parser) ---
+                  go test -json ./... 2>&1 | tee test.json
+                  status=${PIPESTATUS[0]}
+                  go-junit-report -parser gojson -in test.json -out test-results.xml
+
+                  # --- Coverage HTML ---
+                  go test -coverprofile=coverage.out -covermode=atomic ./...
+                  go tool cover -html=coverage.out -o coverage.html
+
+                  mkdir -p reports
+                  mv coverage.html reports/
+
+                  # Quick sanity
+                  ls -lah test-results.xml reports/coverage.html || true
+
+                  exit $status
+                '
+              '''
+            }
+          }
+          post {
+            always {
+              junit testResults: 'bugtracker-backend/test-results.xml', allowEmptyResults: false
+              publishHTML target: [
+                reportDir: 'bugtracker-backend/reports',
+                reportFiles: 'coverage.html',
+                reportName: 'Backend Coverage Report',
+                keepAll: true,
+                alwaysLinkToLastBuild: true,
+                allowMissing: true
+              ]
+              archiveArtifacts artifacts: 'bugtracker-backend/{test.json,coverage.out,reports/coverage.html}', allowEmptyArchive: true
+            }
+          }
         }
-    }
-}
+
+        stage('Unit Tests - Frontend') {
+          agent {
+            docker {
+              image 'node:20-alpine'     // switch to 'node:20' if native deps complain
+              reuseNode true
+            }
+          }
+          steps {
+            dir('bugtracker-frontend') {
+              sh '''
+                set -e
+
+                # Install deps
+                npm ci
+
+                # Ensure jest-junit writes test-results.xml at project root
+                # Requires devDependency: jest-junit
+                # Either configured in package.json "jest-junit" or via env var below:
+                export JEST_JUNIT_OUTPUT="test-results.xml"
+
+                # Run tests in CI mode with coverage
+                CI=true npm test -- --coverage --watch=false --reporters=default --reporters=jest-junit
+
+                # Move coverage HTML to reports/ so publishHTML has a stable path
+                mkdir -p reports/coverage
+                if [ -d coverage ]; then
+                  # Next/Jest usually writes coverage/lcov-report/index.html
+                  if [ -d coverage/lcov-report ]; then
+                    cp -r coverage/lcov-report/* reports/coverage/
+                  elif [ -f coverage/index.html ]; then
+                    cp -r coverage/* reports/coverage/
+                  fi
+                fi
+
+                # Sanity
+                ls -lah test-results.xml || true
+                ls -lah reports/coverage/index.html || true
+              '''
+            }
+          }
+          post {
+            always {
+              junit testResults: 'bugtracker-frontend/test-results.xml', allowEmptyResults: true
+              publishHTML target: [
+                reportDir: 'bugtracker-frontend/reports/coverage',
+                reportFiles: 'index.html',
+                reportName: 'Frontend Coverage Report',
+                keepAll: true,
+                alwaysLinkToLastBuild: true,
+                allowMissing: true
+              ]
+              archiveArtifacts artifacts: 'bugtracker-frontend/coverage/**', allowEmptyArchive: true
+            }
+          }
+        }
+
+      } // end parallel
+    } // end "Execute Unit Tests"
+  } // end stages
+} // end pipeline
