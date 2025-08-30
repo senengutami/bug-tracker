@@ -6,52 +6,22 @@ pipeline {
       steps {
         script {
           docker.image('golang:1.21').inside('') {
-            dir('bugtracker-backend') {
+            dir('bug-tracker/bugtracker-backend') {
               sh '''
-  bash -lc '
-    set -euo pipefail
-
-    export GOCACHE=/tmp/go-build
-    export GOMODCACHE=/tmp/go-mod
-    mkdir -p "$GOCACHE" "$GOMODCACHE"
-
-    go version
-    go env GOPATH GOMOD
-
-    go mod download
-
-    # Install converter and expose on PATH
-    go install github.com/jstemmer/go-junit-report/v2@latest
-    export PATH="$(go env GOPATH)/bin:$PATH"
-    which go-junit-report
-
-    echo "== run tests in JSON mode =="
-    # JSON is stable; feed it to go-junit-report with the gojson parser
-    go test -json ./... 2>&1 | tee test.json
-    status=${PIPESTATUS[0]}
-
-    echo "== convert JSON to JUnit =="
-    go-junit-report -parser gojson -in test.json -out test-results.xml
-
-    echo "== sanity check =="
-    ls -lah test.json test-results.xml
-    echo "--- first 20 lines of XML ---"
-    head -n 20 test-results.xml || true
-
-    # return go test exit code so stage is red if tests failed
-    exit $status
-  '
-'''
-
+                set -e
+                export GOCACHE=/tmp/go-build
+                export GOMODCACHE=/tmp/go-mod
+                mkdir -p "$GOCACHE" "$GOMODCACHE"
+                go mod download
+                go test -json ./... | tee test.json | go-junit-report -parser gojson -in test.json -out test-results.xml
+              '''
             }
           }
         }
       }
       post {
         always {
-          junit 'bugtracker-backend/test-results.xml'
-          // optional: archive raw xml too
-          archiveArtifacts artifacts: 'bugtracker-backend/test-results.xml', allowEmptyArchive: true
+          junit 'bug-tracker/bugtracker-backend/test-results.xml'
         }
       }
     }
@@ -59,24 +29,23 @@ pipeline {
     stage('Unit Tests - Frontend') {
       agent {
         docker {
-          image 'node:20-alpine'   // switch to 'node:20' if native deps cause trouble
+          image 'node:20-alpine'
           reuseNode true
         }
       }
       steps {
-        dir('bugtracker-frontend') {
+        dir('bug-tracker/bugtracker-frontend') {
           sh '''
             set -e
             npm ci
             CI=true npm test -- --watch=false
-            ls -la .  # debug: confirm test-results.xml exists
           '''
         }
       }
       post {
         always {
-          junit 'bugtracker-frontend/test-results.xml'
-          archiveArtifacts artifacts: 'bugtracker-frontend/coverage/**', allowEmptyArchive: true
+          junit 'bug-tracker/bugtracker-frontend/test-results.xml'
+          archiveArtifacts artifacts: 'bug-tracker/bugtracker-frontend/coverage/**', allowEmptyArchive: true
         }
       }
     }
