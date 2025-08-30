@@ -2,18 +2,41 @@ pipeline {
   agent any
 
   stages {
+
     stage('Unit Tests - Backend') {
       steps {
         script {
           docker.image('golang:1.21').inside('') {
-            dir('bug-tracker/bugtracker-backend') {
+            dir('bugtracker-backend') {
               sh '''
-                set -e
-                export GOCACHE=/tmp/go-build
-                export GOMODCACHE=/tmp/go-mod
-                mkdir -p "$GOCACHE" "$GOMODCACHE"
-                go mod download
-                go test -json ./... | tee test.json | go-junit-report -parser gojson -in test.json -out test-results.xml
+                bash -lc '
+                  set -euo pipefail
+
+                  # sanity checks
+                  pwd; ls -la
+                  test -f go.mod || { echo "go.mod not found in $(pwd)"; exit 2; }
+
+                  # caches
+                  export GOCACHE=/tmp/go-build
+                  export GOMODCACHE=/tmp/go-mod
+                  mkdir -p "$GOCACHE" "$GOMODCACHE"
+
+                  # fetch deps (optional; go test would do it too)
+                  go mod download
+
+                  # converter
+                  go install github.com/jstemmer/go-junit-report/v2@latest
+                  export PATH="$(go env GOPATH)/bin:$PATH"
+
+                  # run tests and convert JSON -> JUnit
+                  go test -json ./... 2>&1 | tee test.json
+                  status=${PIPESTATUS[0]}
+                  go-junit-report -parser gojson -in test.json -out test-results.xml
+
+                  ls -lah test.json test-results.xml
+                  head -n 20 test-results.xml || true
+                  exit $status
+                '
               '''
             }
           }
@@ -21,7 +44,8 @@ pipeline {
       }
       post {
         always {
-          junit 'bug-tracker/bugtracker-backend/test-results.xml'
+          junit testResults: 'bugtracker-backend/test-results.xml', allowEmptyResults: false
+          archiveArtifacts artifacts: 'bugtracker-backend/test.json, bugtracker-backend/test-results.xml', allowEmptyArchive: true
         }
       }
     }
@@ -34,20 +58,22 @@ pipeline {
         }
       }
       steps {
-        dir('bug-tracker/bugtracker-frontend') {
+        dir('bugtracker-frontend') {
           sh '''
             set -e
             npm ci
             CI=true npm test -- --watch=false
+            ls -la test-results.xml || true
           '''
         }
       }
       post {
         always {
-          junit 'bug-tracker/bugtracker-frontend/test-results.xml'
-          archiveArtifacts artifacts: 'bug-tracker/bugtracker-frontend/coverage/**', allowEmptyArchive: true
+          junit 'bugtracker-frontend/test-results.xml'
+          archiveArtifacts artifacts: 'bugtracker-frontend/coverage/**', allowEmptyArchive: true
         }
       }
     }
-  }
+
+  } // end stages
 }
