@@ -2,8 +2,7 @@ name: CI
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -20,9 +19,7 @@ jobs:
 
       - name: Execute Backend Unit Tests
         working-directory: ./bugtracker-backend
-        run: |
-
-          go test -v ./...
+        run: go test -v ./...
 
   unit-test-frontend:
     needs: unit-tests-backend
@@ -40,14 +37,13 @@ jobs:
       - name: Execute Frontend Unit Tests
         working-directory: ./bugtracker-frontend
         run: |
-          npm ci 
+          npm ci
           npm test
 
       - name: Publish Frontend Test Results
-        uses: dorny/test-reporter@v1
         if: always()
+        uses: dorny/test-reporter@v1
         with:
           name: Frontend Unit Test Report
           path: bugtracker-frontend/test-result.xml
           reporter: jest-junit
-      
