@@ -5,18 +5,20 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  checks: write
+
 jobs:
   unit-tests-backend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
           go-version: "1.21"
           cache-dependency-path: bugtracker-backend/go.sum
-
       - name: Execute Backend Unit Tests
         working-directory: ./bugtracker-backend
         run: go test -v ./...
@@ -34,11 +36,15 @@ jobs:
           cache: "npm"
           cache-dependency-path: bugtracker-frontend/package-lock.json
 
-      - name: Execute Frontend Unit Tests
+      - name: Execute Frontend Unit Tests (produce JUnit)
         working-directory: ./bugtracker-frontend
+        env:
+          CI: "true"
+          # write junit to ./bugtracker-frontend/test-result.xml
+          JEST_JUNIT_OUTPUT: test-result.xml
         run: |
           npm ci
-          npm test
+          npm test -- --ci --runInBand --reporters=default --reporters=jest-junit
 
       - name: Publish Frontend Test Results
         if: always()
