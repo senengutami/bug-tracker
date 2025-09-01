@@ -2,26 +2,27 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   workflow_dispatch:
-
-permissions:
-  contents: read
-  checks: write
 
 jobs:
   unit-tests-backend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
           go-version: "1.21"
           cache-dependency-path: bugtracker-backend/go.sum
+
       - name: Execute Backend Unit Tests
         working-directory: ./bugtracker-backend
-        run: go test -v ./...
+        run: |
+
+          go test -v ./...
 
   unit-test-frontend:
     needs: unit-tests-backend
@@ -36,22 +37,11 @@ jobs:
           cache: "npm"
           cache-dependency-path: bugtracker-frontend/package-lock.json
 
-      - name: Execute Frontend Unit Tests (produce JUnit)
+      - name: Execute Frontend Unit Tests
         working-directory: ./bugtracker-frontend
-        env:
-          CI: "true"
-          # tell jest-junit where to write the XML
-          JEST_JUNIT_OUTPUT: test-result.xml
         run: |
-          npm ci
-          # ensure jest-junit runs so XML is created
-          npm test -- --ci --runInBand --reporters=default --reporters=jest-junit
-          ls -l test-result.xml  # debug: prove the file exists
+          npm ci 
+          npm test
 
-      - name: Publish Frontend Test Results
-        if: always()
-        uses: dorny/test-reporter@v1
-        with:
-          name: Frontend Unit Test Report
-          path: bugtracker-frontend/test-result.xml
-          reporter: jest-junit
+      
+      
