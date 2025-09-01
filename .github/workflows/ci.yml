@@ -40,11 +40,13 @@ jobs:
         working-directory: ./bugtracker-frontend
         env:
           CI: "true"
-          # write junit to ./bugtracker-frontend/test-result.xml
+          # tell jest-junit where to write the XML
           JEST_JUNIT_OUTPUT: test-result.xml
         run: |
           npm ci
+          # ensure jest-junit runs so XML is created
           npm test -- --ci --runInBand --reporters=default --reporters=jest-junit
+          ls -l test-result.xml  # debug: prove the file exists
 
       - name: Publish Frontend Test Results
         if: always()
